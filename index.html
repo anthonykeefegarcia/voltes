@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<script>
+  // When this page is served from outside Google (the Voltes website), there is no
+  // google.script.run: provide one that calls the Voltes web API instead.
+  if (typeof google === 'undefined' || !google.script) {
+    var VOLTES_API = 'https://script.google.com/macros/s/AKfycbwcP16LGly4JlJjujc88oGNAx8NCmUth_6utQk0I2HSopcp_PlRRI_GHW8GR24gAbb8sQ/exec';
+    var makeRunner = function (onOk, onFail) {
+      return new Proxy({}, {
+        get: function (_, name) {
+          if (name === 'withSuccessHandler') return function (f) { return makeRunner(f, onFail); };
+          if (name === 'withFailureHandler') return function (f) { return makeRunner(onOk, f); };
+          return function () {
+            var args = Array.prototype.slice.call(arguments);
+            fetch(VOLTES_API, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request: no preflight
+              body: JSON.stringify({ fn: name, args: args })
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                if (j.ok) { if (onOk) onOk(j.result); }
+                else if (onFail) onFail(new Error(j.error));
+              })
+              .catch(function (err) { if (onFail) onFail(new Error('Cannot reach Voltes: ' + err.message)); });
+          };
+        }
+      });
+    };
+    window.google = { script: { run: makeRunner() } };
+  }
+</script>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #03080f;
+    --panel: rgba(8, 24, 40, 0.78);
+    --line: rgba(0, 200, 255, 0.28);
+    --cyan: #19d3ff;
+    --cyan-dim: #0f7fa3;
+    --text: #cdefff;
+    --muted: #6f9bb3;
+    --red: #ff3b5c;
+    --amber: #ffb02e;
+    --green: #2dffb0;
+    --magenta: #ff2fa8;
+    --pink: #ffb3da;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% -10%, #0b2a44 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 13px/1.4 "Segoe UI", Roboto, Arial, sans-serif;
+    letter-spacing: 0.02em;
+  }
+  body::before { /* faint grid */
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(25,211,255,.04) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(25,211,255,.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(90deg, rgba(25,211,255,.08), transparent 60%);
+  }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .core {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 2px solid var(--cyan); box-shadow: 0 0 14px var(--cyan), inset 0 0 10px var(--cyan);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { box-shadow: 0 0 26px var(--cyan), inset 0 0 18px var(--cyan); } }
+  h1 { margin: 0; font-size: 24px; letter-spacing: .45em; color: var(--cyan); text-shadow: 0 0 12px rgba(25,211,255,.6); }
+  .sub { color: var(--muted); font-size: 11px; letter-spacing: .25em; }
+  .hud { text-align: right; font-size: 12px; color: var(--muted); }
+  .hud b { color: var(--cyan); font-size: 18px; letter-spacing: .1em; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+         box-shadow: 0 0 8px var(--green); margin-right: 6px; }
+  .dot.off { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+  main {
+    display: grid; gap: 14px; padding: 14px 22px 22px;
+    grid-template-columns: 300px 1fr 360px;
+    grid-template-areas:
+      "fleet radar today"
+      "chat chat feed"
+      "table table table";
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; grid-template-areas: "chat" "today" "fleet" "radar" "table" "feed"; }
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    padding: 12px 14px; position: relative; min-width: 0;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  }
+  .panel h2 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .3em;
+    color: var(--cyan); text-transform: uppercase;
+  }
+  .panel h2::before { content: "◢ "; color: var(--cyan-dim); }
+
+  /* Fleet status bars */
+  .bar { display: grid; grid-template-columns: 128px 1fr 34px; align-items: center; gap: 8px; margin: 5px 0; font-size: 11px; }
+  .bar .track { height: 8px; background: rgba(25,211,255,.08); border-radius: 1px; overflow: hidden; }
+  .bar .fill { height: 100%; background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); box-shadow: 0 0 6px var(--cyan); transition: width .8s; }
+  .bar.alert .fill { background: linear-gradient(90deg, #8a1f33, var(--red)); box-shadow: 0 0 6px var(--red); }
+  .bar .n { text-align: right; color: var(--cyan); font-variant-numeric: tabular-nums; }
+  .total { margin-top: 10px; color: var(--muted); font-size: 11px; }
+
+  /* Radar */
+  #radarWrap { display: flex; gap: 12px; align-items: center; }
+  #radar { width: 100%; max-width: 330px; aspect-ratio: 1; flex: 0 0 auto; }
+  #radarList { flex: 1; max-height: 330px; overflow: auto; font-size: 12px; }
+  .blipRow { padding: 4px 6px; border-left: 2px solid var(--cyan-dim); margin-bottom: 4px; background: rgba(25,211,255,.04); }
+  .blipRow.red { border-left-color: var(--red); background: rgba(255,59,92,.08); }
+  .legend { color: var(--muted); font-size: 11px; margin-top: 6px; }
+
+  /* Today */
+  .day h3 { font-size: 11px; letter-spacing: .2em; margin: 10px 0 4px; color: var(--muted); font-weight: 600; }
+  .day h3 .c { color: var(--text); }
+  .chip { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; margin: 3px 0; font-size: 12px; border-radius: 2px; }
+  .chip.today { background: rgba(255,47,168,.16); border-left: 3px solid var(--magenta); }
+  .chip.tomorrow { background: rgba(255,179,218,.08); border-left: 3px solid var(--pink); }
+  .chip span:last-child { color: var(--muted); white-space: nowrap; }
+  .empty { color: var(--muted); font-size: 12px; font-style: italic; }
+
+  /* Table */
+  .tableWrap { max-height: 520px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { position: sticky; top: 0; background: #071a2b; color: var(--cyan); font-weight: 600; text-align: left;
+       font-size: 10px; letter-spacing: .15em; padding: 6px; border-bottom: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
+  td { padding: 6px; border-bottom: 1px solid rgba(25,211,255,.08); vertical-align: top; }
+  tr.red td { background: rgba(255,59,92,.08); }
+  tr.red td:first-child { box-shadow: inset 3px 0 var(--red); }
+  .status { font-size: 10px; letter-spacing: .08em; padding: 2px 6px; border: 1px solid var(--cyan-dim); border-radius: 2px; white-space: nowrap; }
+  .status.moving { border-color: var(--cyan); color: var(--cyan); }
+  .status.delayed { border-color: var(--amber); color: var(--amber); }
+  .alertCell { color: var(--muted); max-width: 320px; }
+  .filter { float: right; margin-top: -4px; }
+  input[type=search], textarea {
+    background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 8px; font: inherit; outline: none;
+  }
+  input[type=search]:focus, textarea:focus { border-color: var(--cyan); box-shadow: 0 0 8px rgba(25,211,255,.3); }
+
+  /* Feed */
+  #feed { max-height: 330px; overflow: auto; font-size: 12px; }
+  .msg { padding: 6px 8px; margin-bottom: 5px; border-left: 2px solid var(--cyan-dim); background: rgba(25,211,255,.04); }
+  .msg.urgent { border-left-color: var(--red); background: rgba(255,59,92,.09); }
+  .msg.error { border-left-color: var(--amber); }
+  .msg .meta { color: var(--muted); font-size: 10px; letter-spacing: .1em; margin-bottom: 2px; }
+  .msg .sugg { color: var(--green); font-size: 11px; }
+
+  /* Chat */
+  #chatLog { height: 280px; overflow: auto; margin-bottom: 8px; font-size: 13px; }
+  .quick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .quick button { padding: 6px 12px; font-size: 11px; letter-spacing: .12em; }
+  .quick select { background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); padding: 5px 6px; font: inherit; }
+  .quick label { color: var(--muted); font-size: 11px; letter-spacing: .15em; }
+  .q { color: var(--cyan); margin: 8px 0 2px; }
+  .q::before { content: "YOU › "; color: var(--cyan-dim); font-size: 10px; letter-spacing: .15em; }
+  .a { white-space: pre-wrap; margin: 2px 0 8px; }
+  .a::before { content: "VOLTES › "; color: var(--green); font-size: 10px; letter-spacing: .15em; }
+  .thinking { color: var(--muted); font-style: italic; }
+  #chatForm { display: flex; gap: 8px; }
+  #chatInput { flex: 1; resize: none; height: 40px; }
+  button {
+    background: transparent; color: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
+    padding: 0 16px; font: inherit; letter-spacing: .2em; cursor: pointer;
+  }
+  button:hover { background: rgba(25,211,255,.12); box-shadow: 0 0 10px rgba(25,211,255,.4); }
+  button:disabled { opacity: .4; cursor: wait; }
+  #err { color: var(--red); padding: 0 22px; }
+
+  /* Team passcode lock screen */
+  #lock {
+    position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 30%, #0b2a44 0%, var(--bg) 70%);
+  }
+  #lock[hidden] { display: none; }
+  #lock form { width: min(360px, 90vw); text-align: center; }
+  #lock h1 { margin: 18px 0 4px; }
+  #lock .core { margin: 0 auto; width: 64px; height: 64px; }
+  #lock input {
+    width: 100%; margin: 22px 0 10px; padding: 12px; text-align: center; font-size: 16px; letter-spacing: .15em;
+    background: rgba(0,0,0,.4); color: var(--text); border: 1px solid var(--line); outline: none; text-transform: uppercase;
+  }
+  #lock input:focus { border-color: var(--cyan); box-shadow: 0 0 10px rgba(25,211,255,.3); }
+  #lock button { width: 100%; padding: 12px; }
+  #lockMsg { min-height: 20px; margin-top: 10px; color: var(--red); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="core"></div>
+    <div>
+      <h1>VOLTES</h1>
+      <div class="sub">JEKA LOGISTICS · DISPATCH INTELLIGENCE</div>
+    </div>
+  </div>
+  <div class="hud">
+    <b id="clock">--:--</b><br>
+    <span id="runState"><span class="dot"></span>CONNECTING…</span> · <span id="updated">-</span>
+  </div>
+</header>
+<div id="err"></div>
+<div id="lock">
+  <form id="lockForm">
+    <div class="core"></div>
+    <h1>VOLTES</h1>
+    <div class="sub">JEKA LOGISTICS · TEAM ACCESS</div>
+    <input id="passInput" type="password" autocomplete="current-password" placeholder="TEAM PASSCODE" aria-label="Team passcode">
+    <button id="passBtn" type="submit">ENTER</button>
+    <div id="lockMsg" role="alert"></div>
+  </form>
+</div>
+
+<main>
+  <section class="panel" style="grid-area:fleet">
+    <h2>Fleet Status</h2>
+    <div id="bars"></div>
+    <div class="total" id="totals"></div>
+  </section>
+
+  <section class="panel" style="grid-area:radar">
+    <h2>Trucks En Route</h2>
+    <div id="radarWrap">
+      <canvas id="radar" width="660" height="660"></canvas>
+      <div id="radarList"></div>
+    </div>
+    <div class="legend">Outer ring = heading to pickup · middle = at pickup / loaded · center = at delivery · <span style="color:var(--red)">red = needs a call</span></div>
+  </section>
+
+  <section class="panel day" style="grid-area:today">
+    <h2>Today &amp; Tomorrow</h2>
+    <div id="today"></div>
+  </section>
+
+  <section class="panel" style="grid-area:table">
+    <h2>Active Loads <span class="filter"><input type="search" id="filter" placeholder="Filter…"></span></h2>
+    <div class="tableWrap"><table>
+      <thead><tr>
+        <th data-k="load">LOAD</th><th data-k="status">STATUS</th><th data-k="customer">CUSTOMER</th>
+        <th data-k="carrier">CARRIER</th><th data-k="route">ROUTE</th><th data-k="pickupDate">PU</th>
+        <th data-k="deliveryDate">DEL</th><th data-k="dispatchBy">BY</th><th data-k="lastContact">LAST UPDATE</th>
+        <th data-k="alerts">VOLTES</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+
+  <section class="panel" style="grid-area:feed">
+    <h2>Voltes Feed</h2>
+    <div id="feed"></div>
+  </section>
+
+  <section class="panel" style="grid-area:chat">
+    <h2>Ask Voltes</h2>
+    <div class="quick">
+      <label for="agent">I AM</label>
+      <select id="agent">
+        <option value="">Everyone</option><option value="J">J</option><option value="D">D</option><option value="B">B</option>
+      </select>
+      <button type="button" data-q="Is there anything urgent right now?">ANYTHING URGENT?</button>
+      <button type="button" data-q="Which trucks need an update or a check call?">TRUCKS NEEDING UPDATE</button>
+      <button type="button" data-q="Which shippers or customers need to be updated, and what should we tell them?">SHIPPERS TO UPDATE</button>
+    </div>
+    <div id="chatLog"></div>
+    <form id="chatForm">
+      <textarea id="chatInput" placeholder="Ask anything, e.g. Where is load 10834? Which pickups are today?"></textarea>
+      <button id="chatBtn" type="submit">ASK</button>
+    </form>
+  </section>
+</main>
+
+<script>
+  var STATUS_ORDER = ['ON HOLD', 'ASSIGNED', 'OTW TO PU', 'DELAYED PICKUP', 'AT PICKUP', 'OTW TO DELIVERY',
+    'DELAYED DELIVERY', 'AT DELIVERY', 'DELIVERED', 'CANCELLED', 'TONU', 'OTW TO RETURN'];
+  // Radar ring by status: 1 = outer (far from delivery), 0.15 = center (at delivery).
+  var RING = { 'OTW TO PU': 0.9, 'DELAYED PICKUP': 0.9, 'AT PICKUP': 0.68, 'OTW TO DELIVERY': 0.45,
+    'DELAYED DELIVERY': 0.45, 'AT DELIVERY': 0.18, 'OTW TO RETURN': 0.95 };
+
+  var state = { active: [], sortKey: 'needsCall', sortDir: -1, blips: [] };
+  var chatHistory = [];
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function $(id) { return document.getElementById(id); }
+
+  function tick() {
+    var d = new Date();
+    $('clock').textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  setInterval(tick, 1000); tick();
+
+  // ---------- Team passcode ----------
+  var passcode = '';
+  try { passcode = localStorage.getItem('voltesPasscode') || ''; } catch (e) { /* storage blocked */ }
+
+  function showLock(msg) {
+    $('lock').hidden = false;
+    $('lockMsg').textContent = msg || '';
+    $('passBtn').disabled = false;
+    $('passInput').focus();
+  }
+  // Server errors starting with PASSCODE / LOCKED mean "show the lock screen".
+  function isPassError(e) { return /PASSCODE|LOCKED/.test(String(e && e.message || e)); }
+
+  $('lockForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var tryCode = $('passInput').value.trim();
+    if (!tryCode) return;
+    $('passBtn').disabled = true;
+    $('lockMsg').textContent = '';
+    google.script.run
+      .withSuccessHandler(function () {
+        passcode = tryCode;
+        try { localStorage.setItem('voltesPasscode', passcode); } catch (err) { /* storage blocked */ }
+        $('passInput').value = '';
+        $('lock').hidden = true;
+        load();
+      })
+      .withFailureHandler(function (err) {
+        showLock(/LOCKED/.test(String(err && err.message || err)) ?
+          'Too many wrong tries. Wait 10 minutes.' : 'Wrong passcode.');
+      })
+      .checkPasscode(tryCode);
+  });
+
+  function load() {
+    if (!$('lock').hidden && !passcode) return; // waiting at the lock screen
+    google.script.run
+      .withSuccessHandler(function (d) { $('lock').hidden = true; render(d); })
+      .withFailureHandler(function (e) {
+        if (isPassError(e)) {
+          var had = passcode;
+          passcode = '';
+          try { localStorage.removeItem('voltesPasscode'); } catch (err) { /* storage blocked */ }
+          return showLock(had ? 'Passcode changed. Enter the new one.' : '');
+        }
+        $('err').textContent = 'Could not load data: ' + (e && e.message || e);
+      })
+      .getDashboardData(passcode);
+  }
+
+  function render(d) {
+    $('err').textContent = '';
+    $('updated').textContent = 'DATA ' + d.now;
+    var on = d.lastRun.indexOf('OFF') < 0;
+    $('runState').innerHTML = '<span class="dot' + (on ? '' : ' off') + '"></span>' + esc(d.lastRun);
+    state.active = d.active;
+    renderBars(d.counts);
+    renderToday(d.today);
+    renderTable();
+    renderFeed(d.feed);
+    buildBlips();
+  }
+
+  function renderBars(counts) {
+    var keys = STATUS_ORDER.concat(Object.keys(counts).filter(function (k) { return STATUS_ORDER.indexOf(k) < 0; }));
+    var activeKeys = keys.filter(function (k) { return ['DELIVERED', 'CANCELLED', 'TONU'].indexOf(k) < 0; });
+    var max = Math.max.apply(null, activeKeys.map(function (k) { return counts[k] || 0; }).concat([1]));
+    var total = 0;
+    $('bars').innerHTML = activeKeys.map(function (k) {
+      var n = counts[k] || 0; total += n;
+      var bad = /DELAYED|ON HOLD/.test(k);
+      return '<div class="bar' + (bad && n ? ' alert' : '') + '"><span>' + esc(k) + '</span>' +
+        '<div class="track"><div class="fill" style="width:' + (n / max * 100) + '%"></div></div>' +
+        '<span class="n">' + n + '</span></div>';
+    }).join('');
+    $('totals').textContent = total + ' active · ' + (counts['DELIVERED'] || 0) + ' delivered · ' +
+      ((counts['CANCELLED'] || 0) + (counts['TONU'] || 0)) + ' cancelled/TONU this tab';
+  }
+
+  function renderToday(t) {
+    function list(title, items, cls, timeKey, place) {
+      return '<h3>' + title + ' <span class="c">' + items.length + '</span></h3>' +
+        (items.length ? items.map(function (x) {
+          return '<div class="chip ' + cls + '"><span><b>' + esc(x.load) + '</b> ' + esc(x[place]) + '</span><span>' +
+            esc(x[timeKey] || '') + ' ' + esc(x.status) + '</span></div>';
+        }).join('') : '<div class="empty">None</div>');
+    }
+    $('today').innerHTML =
+      list('PICKUPS TODAY', t.pickupsToday, 'today', 'pickupTime', 'pickup') +
+      list('DELIVERIES TODAY', t.deliveriesToday, 'today', 'deliveryTime', 'delivery') +
+      list('PICKUPS TOMORROW', t.pickupsTomorrow, 'tomorrow', 'pickupTime', 'pickup') +
+      list('DELIVERIES TOMORROW', t.deliveriesTomorrow, 'tomorrow', 'deliveryTime', 'delivery');
+  }
+
+  function renderTable() {
+    var f = $('filter').value.toLowerCase();
+    var rows = state.active.filter(function (a) {
+      return !f || JSON.stringify(a).toLowerCase().indexOf(f) >= 0;
+    });
+    var k = state.sortKey, dir = state.sortDir;
+    rows.sort(function (a, b) {
+      var x = k === 'route' ? a.pickup + a.delivery : a[k], y = k === 'route' ? b.pickup + b.delivery : b[k];
+      if (x === y) return String(a.load).localeCompare(String(b.load));
+      return (x > y ? 1 : -1) * dir;
+    });
+    $('rows').innerHTML = rows.map(function (a) {
+      var cls = a.moving ? (/DELAYED/.test(a.status) ? 'delayed' : 'moving') : '';
+      return '<tr class="' + (a.needsCall ? 'red' : '') + '">' +
+        '<td><b>' + esc(a.load) + '</b></td>' +
+        '<td><span class="status ' + cls + '">' + esc(a.status) + '</span></td>' +
+        '<td>' + esc(a.customer) + '</td><td>' + esc(a.carrier) + '</td>' +
+        '<td>' + esc(a.pickup) + ' → ' + esc(a.delivery) + '</td>' +
+        '<td>' + esc(a.pickupDate.slice(5)) + ' ' + esc(a.pickupTime) + '</td>' +
+        '<td>' + esc(a.deliveryDate.slice(5)) + ' ' + esc(a.deliveryTime) + '</td>' +
+        '<td>' + esc(a.dispatchBy) + '</td>' +
+        '<td>' + esc(a.lastContact) + (a.hoursSince != null ? ' <span style="color:' +
+          (a.needsCall ? 'var(--red)' : 'var(--muted)') + '">(' + a.hoursSince + 'h)</span>' : '') + '</td>' +
+        '<td class="alertCell">' + (a.silenced ? '🔇 ' : '') + esc(a.alerts) + '</td></tr>';
+    }).join('') || '<tr><td colspan="10" class="empty">No active loads.</td></tr>';
+  }
+  $('filter').addEventListener('input', renderTable);
+  Array.prototype.forEach.call(document.querySelectorAll('th'), function (th) {
+    th.addEventListener('click', function () {
+      var k = th.getAttribute('data-k');
+      state.sortDir = state.sortKey === k ? -state.sortDir : 1;
+      state.sortKey = k;
+      renderTable();
+    });
+  });
+
+  function renderFeed(feed) {
+    $('feed').innerHTML = feed.map(function (m) {
+      var cls = m.urgent ? 'urgent' : m.type === 'ERROR' ? 'error' : '';
+      return '<div class="msg ' + cls + '"><div class="meta">' + esc(m.time) + ' · ' + esc(m.type) +
+        (m.load ? ' · LOAD ' + esc(m.load) : '') + (m.email ? ' · EMAIL ' + esc(m.email) : '') + '</div>' +
+        esc(m.message) + (m.suggested ? '<div class="sugg">Suggested status: ' + esc(m.suggested) + '</div>' : '') +
+        '</div>';
+    }).join('') || '<div class="empty">No messages yet.</div>';
+  }
+
+  // ---------- Radar ----------
+  function hashAngle(s) {
+    var h = 0; s = String(s);
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return (h % 3600) / 3600 * Math.PI * 2;
+  }
+  function buildBlips() {
+    var moving = state.active.filter(function (a) { return a.moving; });
+    state.blips = moving.map(function (a) {
+      return { load: a.load, red: a.needsCall, r: RING[a.status] || 0.6, ang: hashAngle(a.load), a: a };
+    });
+    moving.sort(function (a, b) { return (b.needsCall ? 1 : 0) - (a.needsCall ? 1 : 0); });
+    $('radarList').innerHTML = moving.map(function (a) {
+      return '<div class="blipRow' + (a.needsCall ? ' red' : '') + '"><b>' + esc(a.load) + '</b> ' + esc(a.status) +
+        '<br><span style="color:var(--muted)">' + esc(a.carrier) + (a.hoursSince != null ? ' · ' + a.hoursSince + 'h since update' : '') +
+        '</span></div>';
+    }).join('') || '<div class="empty">No trucks moving right now.</div>';
+  }
+
+  var cv = $('radar'), ctx = cv.getContext('2d');
+  function drawRadar(t) {
+    var W = cv.width, c = W / 2, R = c - 10;
+    ctx.clearRect(0, 0, W, W);
+    ctx.strokeStyle = 'rgba(25,211,255,0.25)'; ctx.lineWidth = 1.5;
+    [0.25, 0.5, 0.75, 1].forEach(function (k) { ctx.beginPath(); ctx.arc(c, c, R * k, 0, Math.PI * 2); ctx.stroke(); });
+    ctx.beginPath(); ctx.moveTo(c - R, c); ctx.lineTo(c + R, c); ctx.moveTo(c, c - R); ctx.lineTo(c, c + R); ctx.stroke();
+
+    var sweep = (t / 2500) % (Math.PI * 2);
+    for (var i = 0; i < 40; i++) { // fading sweep trail
+      ctx.beginPath(); ctx.moveTo(c, c);
+      ctx.arc(c, c, R, sweep - (i + 1) * 0.02, sweep - i * 0.02);
+      ctx.fillStyle = 'rgba(25,211,255,' + (0.22 * (1 - i / 40)) + ')'; ctx.fill();
+    }
+
+    state.blips.forEach(function (b) {
+      var x = c + Math.cos(b.ang) * R * b.r, y = c + Math.sin(b.ang) * R * b.r;
+      var since = ((sweep - b.ang) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      var glow = 0.35 + 0.65 * Math.max(0, 1 - since / 2.5);
+      var color = b.red ? '255,59,92' : '45,255,176';
+      var size = b.red ? 8 + 3 * Math.sin(t / 200) : 6;
+      ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + color + ',' + glow + ')';
+      ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 16; ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(205,239,255,' + Math.max(0.55, glow) + ')';
+      ctx.font = '20px Segoe UI, Arial'; ctx.fillText(b.load, x + 12, y + 6);
+    });
+    requestAnimationFrame(drawRadar);
+  }
+  requestAnimationFrame(drawRadar);
+
+  // ---------- Chat ----------
+  try { $('agent').value = localStorage.getItem('voltesAgent') || ''; } catch (e) { /* storage blocked */ }
+  $('agent').addEventListener('change', function () {
+    try { localStorage.setItem('voltesAgent', $('agent').value); } catch (e) { /* storage blocked */ }
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function (b) {
+    b.addEventListener('click', function () { ask(b.getAttribute('data-q')); });
+  });
+
+  $('chatForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var q = $('chatInput').value.trim();
+    if (!q) return;
+    $('chatInput').value = '';
+    ask(q);
+  });
+
+  function ask(q) {
+    if ($('chatBtn').disabled) return;
+    $('chatBtn').disabled = true;
+    var log = $('chatLog');
+    log.insertAdjacentHTML('beforeend', '<div class="q">' + esc(q) + '</div><div class="a thinking" id="pending">analyzing…</div>');
+    log.scrollTop = log.scrollHeight;
+    google.script.run
+      .withSuccessHandler(function (answer) {
+        var p = $('pending'); p.id = ''; p.className = 'a'; p.textContent = answer || '(no answer)';
+        chatHistory.push({ role: 'user', text: q }, { role: 'assistant', text: answer || '' });
+        $('chatBtn').disabled = false; log.scrollTop = log.scrollHeight;
+      })
+      .withFailureHandler(function (err) {
+        var p = $('pending'); p.id = ''; p.className = 'a'; p.style.color = 'var(--red)';
+        p.textContent = 'Error: ' + (err && err.message || err);
+        $('chatBtn').disabled = false;
+      })
+      .askVoltes(q, chatHistory.slice(-10), $('agent').value, passcode);
+  }
+  $('chatInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('chatForm').requestSubmit(); }
+  });
+
+  load();
+  setInterval(load, 60 * 1000);
+</script>
+</body>
+</html>
